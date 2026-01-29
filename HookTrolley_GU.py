@@ -46,6 +46,7 @@ class HookTrolley_GU(hmNastranBDF_Importer, hmNastranBDF_Exporter, CalcFunc):
 
     hmNastranBDF_Importer.run(self)
 
+
     '''
     # HookTrolley-
     input_list에 사용자로 부터 2중 리스트를 입력받으며 이는 Hook의 권상포인트 그룹이다.
@@ -104,6 +105,21 @@ class HookTrolley_GU(hmNastranBDF_Importer, hmNastranBDF_Exporter, CalcFunc):
     ## Group Unit은 자유도를 6자유도 다 잡기로 수정 (feat, 강상훈)
     # self.Pipe_SPCSetter(self.debugPrint)
     self.COG_SPCSetter(self.debugPrint)
+
+    # =================================================================
+    # [수정] 모든 RBE2 요소의 자유도(DOF)를 123456으로 강제 변경
+    # =================================================================
+    if hasattr(self, 'rigid_dict'):
+      count = 0
+      for rbe_id in self.rigid_dict:
+        # 기존 DOF 값(예: '13', '123')을 '123456'으로 덮어쓰기
+        print(rbe_id)
+        self.rigid_dict[rbe_id]['DOF'] = '123456'
+        count += 1
+
+      if self.debugPrint:
+        print(f"## RBE2 요소 {count}개의 DOF를 123456으로 수정 완료")
+    # =================================================================
     #############################
     '''
     # HookTrolley-
@@ -1318,7 +1334,7 @@ def main():
     try:
       ht = HookTrolley_GU(bdf, export_bdf, HookTrolley_list, lineLength,
                        Safety_Factor=-1.2, lifting_method=lifting_method,
-                       analysis=false, debugPrint=True)
+                       analysis=False, debugPrint=True)
       ht.HookTrolleyRun()
     except Exception as e:
       with open("log.txt", "a") as f:
