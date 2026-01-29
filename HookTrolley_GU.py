@@ -101,7 +101,8 @@ class HookTrolley_GU(hmNastranBDF_Importer, hmNastranBDF_Exporter, CalcFunc):
     배관에서 RBE 중에 1번 경계 조건이 없는 경우 날라가므로, 배관에 1번이 하나라도 없으면 무게 중신에 가까운 Node에 SPC설정
     모델이 날라가는 것 방지를 위해 무게중심 위치에 12방향 경계조건 추가
     '''
-    self.Pipe_SPCSetter(self.debugPrint)
+    ## Group Unit은 자유도를 6자유도 다 잡기로 수정 (feat, 강상훈)
+    # self.Pipe_SPCSetter(self.debugPrint)
     self.COG_SPCSetter(self.debugPrint)
     #############################
     '''
@@ -729,178 +730,178 @@ class HookTrolley_GU(hmNastranBDF_Importer, hmNastranBDF_Exporter, CalcFunc):
       print(f'=> Trolley 해석으로 권상 포인트 {len(self.HookTrolleyLiftingPoint_list)}개로 수정')
       print()
 
-  def Pipe_SPCSetter(self, debugPrint):
-    '''
-    # HookTrolley-
-    배관에서 RBE 중에 1번 경계 조건이 없는 경우 날라가므로, 배관에 1번이 하나라도 없으면 무게 중심에 가까운 Node에 SPC설정
-    '''
-
-    def create_node_to_elements_map(elements_dict, rigid_dict):
-      """
-      각 노드에 연결된 요소와 RBE 요소의 ID를 매핑.
-      이 매핑은 요소들 사이의 연결 관계를 추적하는 데 사용.
-      """
-      node_to_elements_map = defaultdict(set)
-      for elem_id, elem_info in elements_dict.items():
-        if elem_info['PropertyID'] >= 100:
-          for node_id in elem_info['NodesID']:
-            node_to_elements_map[node_id].add(elem_id)
-
-      for rbe_id, rbe_info in rigid_dict.items():
-        ind_node = rbe_info['ind_node']
-        dep_nodes = rbe_info['dep_nodes']
-
-        # 'dep_nodes'가 2개 이상일 경우, 'ind_node'는 제외
-        if len(dep_nodes) > 1:
-          for dep_node in dep_nodes:
-            node_to_elements_map[dep_node].add(rbe_id)
-        # 'dep_nodes'가 1개만 있는 경우, 'ind_node'와 'dep_nodes' 모두 포함
-        else:
-          node_to_elements_map[ind_node].add(rbe_id)
-          for dep_node in dep_nodes:
-            node_to_elements_map[dep_node].add(rbe_id)
-
-      return node_to_elements_map
-
-    def find_connected_elements(start_elem_id, elements_dict, rigid_dict, node_to_elements):
-      """
-      시작 요소에서 연결된 모든 요소들과 RBE를 찾아서 반환합니다.
-      이 함수는 깊이 우선 탐색(DFS)을 사용하여 연결된 요소들을 탐색합니다.
-      """
-      visited = set()  # 방문한 요소를 추적하기 위한 집합입니다. 중복 방문을 방지합니다.
-      queue = deque([start_elem_id])  # 탐색을 시작할 요소의 ID를 포함하는 큐입니다.
-
-      while queue:  # 큐에 요소가 남아있는 동안 계속 탐색을 진행합니다.
-        current_elem = queue.popleft()  # 현재 탐색할 요소를 큐에서 제거합니다.
-        if current_elem not in visited:  # 현재 요소가 아직 방문되지 않았다면
-          visited.add(current_elem)  # 방문한 요소로 표시합니다.
-          # 현재 요소가 elements_dict(일반 요소)에 있는지, 혹은 rigid_dict(RBE)에 있는지 확인합니다.
-          if current_elem in elements_dict:
-            nodes = elements_dict[current_elem]['NodesID']  # 일반 요소인 경우, 연결된 노드들의 ID를 가져옵니다.
-          elif current_elem in rigid_dict:
-            # RBE 요소인 경우, 독립 노드(ind_node)와 종속 노드(dep_nodes)의 ID를 모두 가져옵니다.
-            nodes = [rigid_dict[current_elem]['ind_node']] + rigid_dict[current_elem]['dep_nodes']
-          else:
-            continue  # 현재 요소가 어느 쪽에도 속하지 않으면 다음 요소로 넘어갑니다.
-          # 현재 요소와 연결된 모든 노드에 대해
-          for node_id in nodes:
-            # 해당 노드에 연결된 다른 요소들을 큐에 추가합니다. 이미 방문한 요소는 제외합니다.
-            queue.extend(node_to_elements[node_id] - visited)
-      return visited
-
-    def group_elements(elements_dict, rigid_dict):
-      """
-      모든 요소와 RBE를 연결된 그룹으로 분류합니다.
-      각 그룹은 연결된 요소들의 집합으로 구성됩니다.
-      """
-      node_to_elements = create_node_to_elements_map(elements_dict, rigid_dict)
-      element_groups = []
-      visited_elements = set()
-
-      for elem_id in elements_dict:
-        propertyID = elements_dict[elem_id]['PropertyID']
-        if elem_id not in visited_elements and elements_dict[elem_id]['PropertyID'] >= 100 and \
-                self.property_dict[propertyID]['Section'] == 'TUBE':
-          connected_group = find_connected_elements(elem_id, elements_dict, rigid_dict, node_to_elements)
-          if len(connected_group) > 1:  # 그룹의 크기가 1보다 큰 경우에만 추가
-            element_groups.append(connected_group)
-            visited_elements.update(connected_group)
-
-      for rbe_id in rigid_dict:
-        if rbe_id not in visited_elements:
-          connected_group = find_connected_elements(rbe_id, elements_dict, rigid_dict, node_to_elements)
-          if len(connected_group) > 1:  # 그룹의 크기가 1보다 큰 경우에만 추가
-            element_groups.append(connected_group)
-            visited_elements.update(connected_group)
-
-      return element_groups
-
-    def find_rigid_pipeTopipe(rigid_dict):
-      rigid_nodes_dict = {}  # rigid를 구성하는 node 들울 ind, dep 무관하게 리스트로 묶어 딕셔너리에 모은다.
-      for rbe_id in rigid_dict:
-        if len(rigid_dict[rbe_id]['dep_nodes']) == 1:
-          rigid_nodes_dict[rbe_id] = [rigid_dict[rbe_id]['ind_node'], rigid_dict[rbe_id]['dep_nodes'][0]]
-        else:
-          rigid_nodes_dict[rbe_id] = [*rigid_dict[rbe_id]['dep_nodes']]
-
-      pipeTopipe_rigid_list = []  # 배관과 배관을 연결하는 rigid의 id를 추출하기 위한 리스트 생성
-      for rigid in rigid_nodes_dict:
-        isPipe_A = False
-        isPipe_B = False
-        rigid_nodes = rigid_nodes_dict[rigid]
-        for ele in self.elements_dict:
-          if rigid_nodes[0] in self.elements_dict[ele]['NodesID']:
-            if self.elements_dict[ele]['PropertyID'] >= 100:
-              isPipe_A = True
-          if rigid_nodes[1] in self.elements_dict[ele]['NodesID']:
-            if self.elements_dict[ele]['PropertyID'] >= 100:
-              isPipe_B = True
-
-        if isPipe_A and isPipe_B:  # rigid가 연결하는 양쪽 부재가 모두 배관이라면
-          pipeTopipe_rigid_list.append(rigid)
-
-      return rigid_nodes_dict, pipeTopipe_rigid_list
-
-    # 두 벡터 사이의 각도를 계산하는 함수
-    def angle_between_vectors(v1, v2):
-      unit_v1 = v1 / np.linalg.norm(v1)
-      unit_v2 = v2 / np.linalg.norm(v2)
-      dot_product = np.dot(unit_v1, unit_v2)
-      angle = np.arccos(dot_product)
-      return np.degrees(angle)
-
-    rigid_nodes_dict, find_rigid_pipeTopipe_list = find_rigid_pipeTopipe(self.rigid_dict)
-
-    # self.rigid_dict 딕셔너리 중에서 배관과 배관을 연결하는 딕셔너리들만 모아주는 리스트 생성
-    rigid_pipeTopipe_dict = {k: self.rigid_dict[k] for k in find_rigid_pipeTopipe_list if k in self.rigid_dict}
-
-    self.grouped_pipes = group_elements(self.elements_dict, rigid_pipeTopipe_dict)  # 그룹핑 정상 진행 확인
-
-    self.suppotTopipe_dict = {}  # 그룹별로 서포트에서 파이프로 이어지를 rigid를 모아두는 딕셔너리 생성
-    for i, s in enumerate(self.grouped_pipes):  # 기존의 그룹화 된 그룹도 순회한다.
-      temp_set = set()  # 그룹별 서포트-파이프 rigid를 모아둘 set 생성
-      for rigid in rigid_nodes_dict:  # rigid_nodes_dict의 id를 순회
-        if rigid not in find_rigid_pipeTopipe_list:  # 여기 rigid는 서포트와 배관을 연결하는 것들만
-          for ele in s:  # 하나의 그룹에서 요소만 가지고 와서
-            if ele not in self.rigid_dict.keys():  # 그룹에는 부재와 rigid가 같이 들어있기에 부재만 선택하는 것
-              if rigid_nodes_dict[rigid][0] in self.elements_dict[ele]['NodesID'] or rigid_nodes_dict[rigid][1] in \
-                      self.elements_dict[ele]['NodesID']:  # 서포트와 배관을 연결하는 rigid가 어느 그룹에 속해있는지 판단하기
-                all_node_ids = [node_id for element in self.elements_dict.values() for node_id in element['NodesID']]
-                if rigid_nodes_dict[rigid][0] in all_node_ids and rigid_nodes_dict[rigid][1] in all_node_ids:
-                  temp_set.add(rigid)
-      self.suppotTopipe_dict[f'group{i + 1}'] = temp_set  # 딕셔너리에 그룹별로 support-pipe를 연결하는 rigid id 의 모음
-
-    self.SPC_AddNode_Pipe = []  # 그룹 배관에 SPC를 지정할 Node들을 모아두는 리스트
-    for i, group in enumerate(self.suppotTopipe_dict):  # self.suppotTopipe_dict를 돌면서 dof 1이 존재하는지 유무 판단 절차 시작
-      flag_is_DOF_1 = False  # DOF 1이 존재하는지 판단하는 flag
-      for rigid in self.suppotTopipe_dict[group]:  # 딕셔너리에서 key에 속하는 set의 rigid를 하나씩 가지고 와서
-        if '1' in self.rigid_dict[rigid]['DOF']:  # 그 rigid의 DOF에 '1'이 있다면
-          flag_is_DOF_1 = True  # flag를 True로 변경
-        # print(group, rigid, self.rigid_dict[rigid]['DOF'], flag_is_DOF_1)
-
-      if not flag_is_DOF_1:  # DOF에 1이 없다면?
-        temp_node_list = []
-        for ele in self.grouped_pipes[i]:  # 기존에 생성한 그룹 별로 돌면서
-          temp_node_list.extend(self.elements_dict[ele]['NodesID'])  # DOF가 1이 없는 그룹의 Element를 생성하는 node를 모은다.
-
-        rigidNodes = set()
-        for key, value in self.rigid_dict.items():
-          rigidNodes.add(value['ind_node'])
-          rigidNodes.update(value['dep_nodes'])
-
-        # 정수를 정렬하여 리스트로 변환
-        sorted_rigidNodes_list = sorted(rigidNodes)
-
-        temp_node_list = [i for i in temp_node_list if i not in sorted_rigidNodes_list]
-
-        closest_node, distance = self.find_closest_node(self.nodes_dict, temp_node_list,
-                                                        self.COG_dict)  # COG가 가까운 node 찾기
-
-        self.SPC_AddNode_Pipe.append(closest_node)
-
-    if debugPrint:
-      print('## 6단계 - 1 : Pipe와 RBE의 그룹들 중에서 1번 자유도 없다면 추가')
-      print(f'경계조건 추가 Node: {self.SPC_AddNode_Pipe}')
+  # def Pipe_SPCSetter(self, debugPrint):
+  #   '''
+  #   # HookTrolley-
+  #   배관에서 RBE 중에 1번 경계 조건이 없는 경우 날라가므로, 배관에 1번이 하나라도 없으면 무게 중심에 가까운 Node에 SPC설정
+  #   '''
+  #
+  #   def create_node_to_elements_map(elements_dict, rigid_dict):
+  #     """
+  #     각 노드에 연결된 요소와 RBE 요소의 ID를 매핑.
+  #     이 매핑은 요소들 사이의 연결 관계를 추적하는 데 사용.
+  #     """
+  #     node_to_elements_map = defaultdict(set)
+  #     for elem_id, elem_info in elements_dict.items():
+  #       if elem_info['PropertyID'] >= 100:
+  #         for node_id in elem_info['NodesID']:
+  #           node_to_elements_map[node_id].add(elem_id)
+  #
+  #     for rbe_id, rbe_info in rigid_dict.items():
+  #       ind_node = rbe_info['ind_node']
+  #       dep_nodes = rbe_info['dep_nodes']
+  #
+  #       # 'dep_nodes'가 2개 이상일 경우, 'ind_node'는 제외
+  #       if len(dep_nodes) > 1:
+  #         for dep_node in dep_nodes:
+  #           node_to_elements_map[dep_node].add(rbe_id)
+  #       # 'dep_nodes'가 1개만 있는 경우, 'ind_node'와 'dep_nodes' 모두 포함
+  #       else:
+  #         node_to_elements_map[ind_node].add(rbe_id)
+  #         for dep_node in dep_nodes:
+  #           node_to_elements_map[dep_node].add(rbe_id)
+  #
+  #     return node_to_elements_map
+  #
+  #   def find_connected_elements(start_elem_id, elements_dict, rigid_dict, node_to_elements):
+  #     """
+  #     시작 요소에서 연결된 모든 요소들과 RBE를 찾아서 반환합니다.
+  #     이 함수는 깊이 우선 탐색(DFS)을 사용하여 연결된 요소들을 탐색합니다.
+  #     """
+  #     visited = set()  # 방문한 요소를 추적하기 위한 집합입니다. 중복 방문을 방지합니다.
+  #     queue = deque([start_elem_id])  # 탐색을 시작할 요소의 ID를 포함하는 큐입니다.
+  #
+  #     while queue:  # 큐에 요소가 남아있는 동안 계속 탐색을 진행합니다.
+  #       current_elem = queue.popleft()  # 현재 탐색할 요소를 큐에서 제거합니다.
+  #       if current_elem not in visited:  # 현재 요소가 아직 방문되지 않았다면
+  #         visited.add(current_elem)  # 방문한 요소로 표시합니다.
+  #         # 현재 요소가 elements_dict(일반 요소)에 있는지, 혹은 rigid_dict(RBE)에 있는지 확인합니다.
+  #         if current_elem in elements_dict:
+  #           nodes = elements_dict[current_elem]['NodesID']  # 일반 요소인 경우, 연결된 노드들의 ID를 가져옵니다.
+  #         elif current_elem in rigid_dict:
+  #           # RBE 요소인 경우, 독립 노드(ind_node)와 종속 노드(dep_nodes)의 ID를 모두 가져옵니다.
+  #           nodes = [rigid_dict[current_elem]['ind_node']] + rigid_dict[current_elem]['dep_nodes']
+  #         else:
+  #           continue  # 현재 요소가 어느 쪽에도 속하지 않으면 다음 요소로 넘어갑니다.
+  #         # 현재 요소와 연결된 모든 노드에 대해
+  #         for node_id in nodes:
+  #           # 해당 노드에 연결된 다른 요소들을 큐에 추가합니다. 이미 방문한 요소는 제외합니다.
+  #           queue.extend(node_to_elements[node_id] - visited)
+  #     return visited
+  #
+  #   def group_elements(elements_dict, rigid_dict):
+  #     """
+  #     모든 요소와 RBE를 연결된 그룹으로 분류합니다.
+  #     각 그룹은 연결된 요소들의 집합으로 구성됩니다.
+  #     """
+  #     node_to_elements = create_node_to_elements_map(elements_dict, rigid_dict)
+  #     element_groups = []
+  #     visited_elements = set()
+  #
+  #     for elem_id in elements_dict:
+  #       propertyID = elements_dict[elem_id]['PropertyID']
+  #       if elem_id not in visited_elements and elements_dict[elem_id]['PropertyID'] >= 100 and \
+  #               self.property_dict[propertyID]['Section'] == 'TUBE':
+  #         connected_group = find_connected_elements(elem_id, elements_dict, rigid_dict, node_to_elements)
+  #         if len(connected_group) > 1:  # 그룹의 크기가 1보다 큰 경우에만 추가
+  #           element_groups.append(connected_group)
+  #           visited_elements.update(connected_group)
+  #
+  #     for rbe_id in rigid_dict:
+  #       if rbe_id not in visited_elements:
+  #         connected_group = find_connected_elements(rbe_id, elements_dict, rigid_dict, node_to_elements)
+  #         if len(connected_group) > 1:  # 그룹의 크기가 1보다 큰 경우에만 추가
+  #           element_groups.append(connected_group)
+  #           visited_elements.update(connected_group)
+  #
+  #     return element_groups
+  #
+  #   def find_rigid_pipeTopipe(rigid_dict):
+  #     rigid_nodes_dict = {}  # rigid를 구성하는 node 들울 ind, dep 무관하게 리스트로 묶어 딕셔너리에 모은다.
+  #     for rbe_id in rigid_dict:
+  #       if len(rigid_dict[rbe_id]['dep_nodes']) == 1:
+  #         rigid_nodes_dict[rbe_id] = [rigid_dict[rbe_id]['ind_node'], rigid_dict[rbe_id]['dep_nodes'][0]]
+  #       else:
+  #         rigid_nodes_dict[rbe_id] = [*rigid_dict[rbe_id]['dep_nodes']]
+  #
+  #     pipeTopipe_rigid_list = []  # 배관과 배관을 연결하는 rigid의 id를 추출하기 위한 리스트 생성
+  #     for rigid in rigid_nodes_dict:
+  #       isPipe_A = False
+  #       isPipe_B = False
+  #       rigid_nodes = rigid_nodes_dict[rigid]
+  #       for ele in self.elements_dict:
+  #         if rigid_nodes[0] in self.elements_dict[ele]['NodesID']:
+  #           if self.elements_dict[ele]['PropertyID'] >= 100:
+  #             isPipe_A = True
+  #         if rigid_nodes[1] in self.elements_dict[ele]['NodesID']:
+  #           if self.elements_dict[ele]['PropertyID'] >= 100:
+  #             isPipe_B = True
+  #
+  #       if isPipe_A and isPipe_B:  # rigid가 연결하는 양쪽 부재가 모두 배관이라면
+  #         pipeTopipe_rigid_list.append(rigid)
+  #
+  #     return rigid_nodes_dict, pipeTopipe_rigid_list
+  #
+  #   # 두 벡터 사이의 각도를 계산하는 함수
+  #   def angle_between_vectors(v1, v2):
+  #     unit_v1 = v1 / np.linalg.norm(v1)
+  #     unit_v2 = v2 / np.linalg.norm(v2)
+  #     dot_product = np.dot(unit_v1, unit_v2)
+  #     angle = np.arccos(dot_product)
+  #     return np.degrees(angle)
+  #
+  #   rigid_nodes_dict, find_rigid_pipeTopipe_list = find_rigid_pipeTopipe(self.rigid_dict)
+  #
+  #   # self.rigid_dict 딕셔너리 중에서 배관과 배관을 연결하는 딕셔너리들만 모아주는 리스트 생성
+  #   rigid_pipeTopipe_dict = {k: self.rigid_dict[k] for k in find_rigid_pipeTopipe_list if k in self.rigid_dict}
+  #
+  #   self.grouped_pipes = group_elements(self.elements_dict, rigid_pipeTopipe_dict)  # 그룹핑 정상 진행 확인
+  #
+  #   self.suppotTopipe_dict = {}  # 그룹별로 서포트에서 파이프로 이어지를 rigid를 모아두는 딕셔너리 생성
+  #   for i, s in enumerate(self.grouped_pipes):  # 기존의 그룹화 된 그룹도 순회한다.
+  #     temp_set = set()  # 그룹별 서포트-파이프 rigid를 모아둘 set 생성
+  #     for rigid in rigid_nodes_dict:  # rigid_nodes_dict의 id를 순회
+  #       if rigid not in find_rigid_pipeTopipe_list:  # 여기 rigid는 서포트와 배관을 연결하는 것들만
+  #         for ele in s:  # 하나의 그룹에서 요소만 가지고 와서
+  #           if ele not in self.rigid_dict.keys():  # 그룹에는 부재와 rigid가 같이 들어있기에 부재만 선택하는 것
+  #             if rigid_nodes_dict[rigid][0] in self.elements_dict[ele]['NodesID'] or rigid_nodes_dict[rigid][1] in \
+  #                     self.elements_dict[ele]['NodesID']:  # 서포트와 배관을 연결하는 rigid가 어느 그룹에 속해있는지 판단하기
+  #               all_node_ids = [node_id for element in self.elements_dict.values() for node_id in element['NodesID']]
+  #               if rigid_nodes_dict[rigid][0] in all_node_ids and rigid_nodes_dict[rigid][1] in all_node_ids:
+  #                 temp_set.add(rigid)
+  #     self.suppotTopipe_dict[f'group{i + 1}'] = temp_set  # 딕셔너리에 그룹별로 support-pipe를 연결하는 rigid id 의 모음
+  #
+  #   self.SPC_AddNode_Pipe = []  # 그룹 배관에 SPC를 지정할 Node들을 모아두는 리스트
+  #   for i, group in enumerate(self.suppotTopipe_dict):  # self.suppotTopipe_dict를 돌면서 dof 1이 존재하는지 유무 판단 절차 시작
+  #     flag_is_DOF_1 = False  # DOF 1이 존재하는지 판단하는 flag
+  #     for rigid in self.suppotTopipe_dict[group]:  # 딕셔너리에서 key에 속하는 set의 rigid를 하나씩 가지고 와서
+  #       if '1' in self.rigid_dict[rigid]['DOF']:  # 그 rigid의 DOF에 '1'이 있다면
+  #         flag_is_DOF_1 = True  # flag를 True로 변경
+  #       # print(group, rigid, self.rigid_dict[rigid]['DOF'], flag_is_DOF_1)
+  #
+  #     if not flag_is_DOF_1:  # DOF에 1이 없다면?
+  #       temp_node_list = []
+  #       for ele in self.grouped_pipes[i]:  # 기존에 생성한 그룹 별로 돌면서
+  #         temp_node_list.extend(self.elements_dict[ele]['NodesID'])  # DOF가 1이 없는 그룹의 Element를 생성하는 node를 모은다.
+  #
+  #       rigidNodes = set()
+  #       for key, value in self.rigid_dict.items():
+  #         rigidNodes.add(value['ind_node'])
+  #         rigidNodes.update(value['dep_nodes'])
+  #
+  #       # 정수를 정렬하여 리스트로 변환
+  #       sorted_rigidNodes_list = sorted(rigidNodes)
+  #
+  #       temp_node_list = [i for i in temp_node_list if i not in sorted_rigidNodes_list]
+  #
+  #       closest_node, distance = self.find_closest_node(self.nodes_dict, temp_node_list,
+  #                                                       self.COG_dict)  # COG가 가까운 node 찾기
+  #
+  #       self.SPC_AddNode_Pipe.append(closest_node)
+  #
+  #   if debugPrint:
+  #     print('## 6단계 - 1 : Pipe와 RBE의 그룹들 중에서 1번 자유도 없다면 추가')
+  #     print(f'경계조건 추가 Node: {self.SPC_AddNode_Pipe}')
 
   def COG_SPCSetter(self, debugPrint):
     '''
@@ -991,9 +992,9 @@ class HookTrolley_GU(hmNastranBDF_Importer, hmNastranBDF_Exporter, CalcFunc):
 
     self.model.spcs.clear()
     # 새로운 SPC 정보 반영
-    for i in self.SPC_AddNode_Pipe:  # 그룹 pipe의 COG에 가장 가까운 Node에 SPC 추가
-      new_spc = [1, i, '1', '0.0']
-      self.addNewSPC(new_spc)
+    # for i in self.SPC_AddNode_Pipe:  # 그룹 pipe의 COG에 가장 가까운 Node에 SPC 추가
+    #   new_spc = [1, i, '1', '0.0']
+    #   self.addNewSPC(new_spc)
 
     for i in self.SPC_AddNode_ROD:  # 권상하게 되는 ROD의 고정 점에 SPC 추가
       new_spc = [1, i, '123456', '0.0']
@@ -1317,7 +1318,7 @@ def main():
     try:
       ht = HookTrolley_GU(bdf, export_bdf, HookTrolley_list, lineLength,
                        Safety_Factor=-1.2, lifting_method=lifting_method,
-                       analysis=True, debugPrint=True)
+                       analysis=false, debugPrint=True)
       ht.HookTrolleyRun()
     except Exception as e:
       with open("log.txt", "a") as f:
