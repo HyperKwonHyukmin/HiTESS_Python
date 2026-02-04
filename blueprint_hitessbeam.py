@@ -119,10 +119,7 @@ def CsvToBdf():
         )
 
         # 선환햄 CsvToBdf.exe에서 GRAV가 이상하게 나와서 이부분을 수정하는 과정 추가
-        import os
 
-        # 1. 파일 경로 (기존 코드에서 받아온 bdf_file 변수 사용)
-        # bdf_file = run_CsvToBdf(...)
 
         def clean_up_grav_card(file_path):
             if not os.path.exists(file_path):
@@ -413,7 +410,7 @@ def ModuleUnit():
         HiTESS_Beam.ModuleGroupUnitRun(programName, user_id, userName, userCompany, userDept)
         
         bdf, HookTrolley_list, lineLength, lifting_method = InforgetMode(input_bdf)
-        
+        print("현재 작동 프로그램명령어 : ", programName)
         # Module Unit 경우
         if programName == "ModuleUnit":
             HookTrolleyInstance = HookTrolley(bdf, output_bdf, HookTrolley_list, lineLength, Safety_Factor=1.2,
@@ -423,6 +420,7 @@ def ModuleUnit():
         
         # Group Unit 경우
         elif programName == "GroupUnit": 
+            print("GroupUnit 해석 실행 들어옴")
             HookTrolleyInstance = HookTrolley_GU(bdf, output_bdf, HookTrolley_list, lineLength, Safety_Factor=1.2,
                                               lifting_method=lifting_method,
                                               analysis=True, debugPrint=True)  # trolley 모델
